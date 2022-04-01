@@ -1,0 +1,9 @@
+[[order]]
+
+[stack]
+  id = "io.buildpacks.stacks.bionic"
+  run-image = "ghcr.io/chuxel/devcontainer-features/stack-devcontainer-run-image"
+  build-image = "ghcr.io/chuxel/devcontainer-features/stack-devcontainer-build-image"
+
+[lifecycle]
+  uri = "./lifecycle.tgz"

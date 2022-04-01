@@ -97,7 +97,18 @@ func (b *Descriptor) Build(bpPlan Plan, config BuildConfig, bpEnv BuildEnv) (Bui
 	}
 
 	config.Logger.Debug("Processing layers")
-	bpLayers, err := b.processLayers(bpLayersDir, config.Logger)
+	// **START HACK** Always set launch to true if we're in dev container mode
+	buildMode := "production"
+	varList, _ := bpEnv.WithPlatform(config.PlatformDir)
+	for _, envVar := range varList {
+		if strings.HasPrefix(envVar, "BP_DCNB_BUILD_MODE=") {
+			buildMode = strings.TrimPrefix(envVar, "BP_DCNB_BUILD_MODE=")
+			break
+		}
+	}
+	config.Logger.Info("Build mode: " + buildMode)
+	bpLayers, err := b.processLayers(bpLayersDir, config.Logger, buildMode == "devcontainer")
+	// **END HACK**
 	if err != nil {
 		return BuildResult{}, err
 	}
@@ -124,7 +135,7 @@ func renameLayerDirIfNeeded(layerMetadataFile LayerMetadataFile, layerDir string
 	return nil
 }
 
-func (b *Descriptor) processLayers(layersDir string, logger Logger) (map[string]LayerMetadataFile, error) {
+func (b *Descriptor) processLayers(layersDir string, logger Logger, forceBuildLayersToLaunchLayers bool) (map[string]LayerMetadataFile, error) {
 	if api.MustParse(b.API).LessThan("0.6") {
 		return eachLayer(layersDir, b.API, func(path, buildpackAPI string) (LayerMetadataFile, error) {
 			layerMetadataFile, msg, err := DecodeLayerMetadataFile(path+".toml", buildpackAPI)
@@ -145,6 +156,43 @@ func (b *Descriptor) processLayers(layersDir string, logger Logger) (map[string]
 		if msg != "" {
 			return LayerMetadataFile{}, errors.New(msg)
 		}
+		//**START HACK** If forceBuildLayersToLaunchLayers was set to true, update matadata
+		logger.Info("Layer metadata: " + fmt.Sprint(layerMetadataFile))
+		if forceBuildLayersToLaunchLayers && layerMetadataFile.Build {
+			logger.Info("Updating " + path + ".toml metadata so launch=true")
+			layerMetadataFile.Launch = true
+			type typesTable struct {
+				Build  bool `toml:"build"`
+				Launch bool `toml:"launch"`
+				Cache  bool `toml:"cache"`
+			}
+			type layerMetadataTomlFile struct {
+				Data  interface{} `toml:"metadata"`
+				Types typesTable  `toml:"types"`
+			}
+			meatdataToml := layerMetadataTomlFile{
+				Data: layerMetadataFile.Data,
+				Types: typesTable{
+					Launch: layerMetadataFile.Launch,
+					Build:  layerMetadataFile.Build,
+					Cache:  layerMetadataFile.Cache,
+				},
+			}
+			f, err := os.Create(path + ".toml")
+			if err != nil {
+				return layerMetadataFile, err
+			}
+			if err := toml.NewEncoder(f).Encode(meatdataToml); err != nil {
+				return layerMetadataFile, err
+			}
+			if err := f.Close(); err != nil {
+				return layerMetadataFile, err
+
+			}
+			bytes, _ := os.ReadFile(path + ".toml")
+			logger.Info(string(bytes))
+		}
+		//**END HACK**
 		if err := renameLayerDirIfNeeded(layerMetadataFile, path); err != nil {
 			return LayerMetadataFile{}, err
 		}
@@ -170,6 +218,7 @@ func preparePaths(bpID string, bpPlan Plan, layersDir, planDir string) (string, 
 	return bpLayersDir, bpPlanPath, nil
 }
 
+//**START HACK** any build command modifications go here
 func (b *Descriptor) runBuildCmd(bpLayersDir, bpPlanPath string, config BuildConfig, bpEnv BuildEnv) error {
 	cmd := exec.Command(
 		filepath.Join(b.Dir, "bin", "build"),
