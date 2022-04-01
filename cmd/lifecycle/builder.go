@@ -11,6 +11,7 @@ import (
 	"github.com/buildpacks/lifecycle/internal/encoding"
 	"github.com/buildpacks/lifecycle/launch"
 	"github.com/buildpacks/lifecycle/platform"
+	"github.com/buildpacks/lifecycle/priv"
 )
 
 type buildCmd struct {
@@ -59,13 +60,9 @@ func (b *buildCmd) Args(nargs int, args []string) error {
 
 func (b *buildCmd) Privileges() error {
 	// builder should never be run with privileges
-	//**START HACK**
-	/*
-		if priv.IsPrivileged() {
-			return cmd.FailErr(errors.New("refusing to run as root"), "build")
-		}
-	*/
-	//**END HACK**
+	if priv.IsPrivileged() {
+		return cmd.FailErr(errors.New("refusing to run as root"), "build")
+	}
 	return nil
 }
 
